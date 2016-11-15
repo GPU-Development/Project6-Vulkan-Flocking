@@ -41,12 +41,69 @@ layout (binding = 2) uniform UBO
 	int particleCount;
 } ubo;
 
+
+layout(std140, binding = 3) buffer GridIdx
+{
+	uint gridIdx[ ];
+};
+
+vec2 center, separate, cohesion;
+
+float computeVelocityChangePair(uint idx1, uint idx2) 
+{
+	Particle p1 = particlesA[idx1];
+	Particle p2 = particlesA[idx2];
+	float n = 0;
+	vec2 dv;
+
+	// handle screen wrapping
+	vec2 delta = p2.pos - p1.pos;
+	float dist = sqrt(dot(delta, delta));
+
+	// RULE 1:  Move to center of mass
+	if (dist < ubo.rule1Distance) {
+		center += p2.pos.xy;
+		n++;
+	}
+
+	// RULE 2:  Maintain minimum distance from neighbors
+	if (dist < ubo.rule2Distance) {
+		separate -= delta.xy;
+	}
+
+	// RULE 3:  Align Velocities
+	if (dist < ubo.rule3Distance) {
+		cohesion += p2.vel.xy;
+	}
+
+	return n;
+}
+
+vec2 computeVelocityChange(uint iSelf) {
+
+	vec2 dv = vec2(0.0);
+	float nBoids = 0;
+
+	for (uint i = 0; i < ubo.particleCount; i++) {
+		if (i != iSelf) {
+			nBoids += computeVelocityChangePair(iSelf, i);
+		}
+	}
+
+	if (nBoids > 0) {
+		center /= nBoids;
+		dv = (center - particlesA[iSelf].pos) * ubo.rule1Scale + cohesion * ubo.rule3Scale + separate * ubo.rule2Scale;
+	}
+
+	return dv;
+}
+
 void main()
 {
-		// LOOK: This is very similar to a CUDA kernel.
-		// Right now, the compute shader only advects the particles with their
-		// velocity and handles wrap-around.
-		// TODO: implement flocking behavior.
+	// LOOK: This is very similar to a CUDA kernel.
+	// Right now, the compute shader only advects the particles with their
+	// velocity and handles wrap-around.
+	// TODO: implement flocking behavior.
 
     // Current SSBO index
     uint index = gl_GlobalInvocationID.x;
@@ -54,21 +111,26 @@ void main()
     if (index >= ubo.particleCount)
 		return;
 
+	// reset params
+	center = vec2(0.0f, 0.0f);
+	separate = vec2(0.0f, 0.0f); 
+	cohesion = vec2(0.0f, 0.0f);
+
     // Read position and velocity
-		vec2 vPos = particlesA[index].pos.xy;
-    vec2 vVel = particlesA[index].vel.xy;
+	vec2 vPos = particlesA[index].pos.xy;
+	vec2 vVel = particlesA[index].vel.xy + computeVelocityChange(index);
 
-		// clamp velocity for a more pleasing simulation.
-		vVel = normalize(vVel) * clamp(length(vVel), 0.0, 0.1);
+	// clamp velocity for a more pleasing simulation.
+	vVel = normalize(vVel) * clamp(length(vVel), 0.0, 0.1);
 
-		// kinematic update
-		vPos += vVel * ubo.deltaT;
+	// kinematic update
+	vPos += vVel * ubo.deltaT;
 
     // Wrap around boundary
-		if (vPos.x < -1.0) vPos.x = 1.0;
-		if (vPos.x > 1.0) vPos.x = -1.0;
-		if (vPos.y < -1.0) vPos.y = 1.0;
-		if (vPos.y > 1.0) vPos.y = -1.0;
+	if (vPos.x < -1.0) vPos.x = 1.0;
+	if (vPos.x > 1.0) vPos.x = -1.0;
+	if (vPos.y < -1.0) vPos.y = 1.0;
+	if (vPos.y > 1.0) vPos.y = -1.0;
 
     particlesB[index].pos.xy = vPos;
 

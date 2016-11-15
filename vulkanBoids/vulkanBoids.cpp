@@ -33,11 +33,11 @@
 // LOOK: constants for the boids algorithm. These will be passed to the GPU compute part of the assignment
 // using a Uniform Buffer. These parameters should yield a stable and pleasing simulation for an
 // implementation based off the code here: http://studio.sketchpad.cc/sp/pad/view/ro.9cbgCRcgbPOI6/rev.23
-#define RULE1DISTANCE 0.1f // cohesion
-#define RULE2DISTANCE 0.05f // separation
-#define RULE3DISTANCE 0.05f // alignment
-#define RULE1SCALE 0.02f
-#define RULE2SCALE 0.05f
+#define RULE1DISTANCE 0.08f // cohesion
+#define RULE2DISTANCE 0.03f // separation
+#define RULE3DISTANCE 0.08f // alignment
+#define RULE1SCALE 0.001f
+#define RULE2SCALE 0.01f
 #define RULE3SCALE 0.01f
 
 class VulkanExample : public VulkanExampleBase
@@ -73,6 +73,7 @@ public:
 	struct {
 		vk::Buffer storageBufferA;					// (Shader) storage buffer object containing the particles
 		vk::Buffer storageBufferB;					// (Shader) storage buffer object containing the particles
+		vk::Buffer gridIdxBuffer;					// (Shader) contains grid index of current particle state
 
 		vk::Buffer uniformBuffer;					// Uniform buffer object containing particle system parameters
 		VkQueue queue;								// Separate queue for compute commands (queue family may differ from the one used for graphics)
@@ -121,6 +122,7 @@ public:
 		// Compute
 		compute.storageBufferA.destroy();
 		compute.storageBufferB.destroy();
+		compute.gridIdxBuffer.destroy();
 
 		compute.uniformBuffer.destroy();
 		vkDestroyPipelineLayout(device, compute.pipelineLayout, nullptr);
@@ -151,13 +153,13 @@ public:
 
 		std::mt19937 rGenerator;
 		std::uniform_real_distribution<float> rDistribution(-1.0f, 1.0f);
-
 		// Initial particle positions
 		std::vector<Particle> particleBuffer(PARTICLE_COUNT);
 		for (auto& particle : particleBuffer)
 		{
 			particle.pos = glm::vec2(rDistribution(rGenerator), rDistribution(rGenerator));
 			// TODO: add randomized velocities with a slight scale here, something like 0.1f.
+			particle.vel = glm::vec2(rDistribution(rGenerator), rDistribution(rGenerator)) * 0.1f;
 		}
 
 		VkDeviceSize storageBufferSize = particleBuffer.size() * sizeof(Particle);
@@ -244,7 +246,7 @@ public:
 			VERTEX_BUFFER_BIND_ID,
 			1,
 			VK_FORMAT_R32G32_SFLOAT,
-			offsetof(Particle, pos)); // TODO: change this so that we can color the particles based on velocity.
+			offsetof(Particle, vel)); // TODO: change this so that we can color the particles based on velocity.
 
 		// vertices.inputState encapsulates everything we need for these particular buffers to
 		// interface with the graphics pipeline.
@@ -540,13 +542,34 @@ public:
 			compute.descriptorSets[0],
 			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 			2,
-			&compute.uniformBuffer.descriptor)
+			&compute.uniformBuffer.descriptor),
 
 			// TODO: write the second descriptorSet, using the top for reference.
 			// We want the descriptorSets to be used for flip-flopping:
 			// on one frame, we use one descriptorSet with the compute pass,
 			// on the next frame, we use the other.
 			// What has to be different about how the second descriptorSet is written here?
+			// Binding 0 : Particle position storage buffer
+
+			vkTools::initializers::writeDescriptorSet(
+			compute.descriptorSets[1], // LOOK: which descriptor set to write to?
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			0, // LOOK: which binding in the descriptor set Layout?
+			&compute.storageBufferB.descriptor), // LOOK: which SSBO?
+
+			// Binding 1 : Particle position storage buffer
+			vkTools::initializers::writeDescriptorSet(
+			compute.descriptorSets[1],
+			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			1,
+			&compute.storageBufferA.descriptor),
+
+			// Binding 2 : Uniform buffer
+			vkTools::initializers::writeDescriptorSet(
+			compute.descriptorSets[1],
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			2,
+			&compute.uniformBuffer.descriptor)
 		};
 
 		vkUpdateDescriptorSets(device, static_cast<uint32_t>(computeWriteDescriptorSets.size()), computeWriteDescriptorSets.data(), 0, NULL);
@@ -590,6 +613,7 @@ public:
 		// We also want to flip what SSBO we draw with in the next
 		// pass through the graphics pipeline.
 		// Feel free to use std::swap here. You should need it twice.
+		std::swap(compute.descriptorSets[0], compute.descriptorSets[1]);
 	}
 
 	// Record command buffers for drawing using the graphics pipeline

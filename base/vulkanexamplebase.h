@@ -50,7 +50,7 @@ private:
 	bool enableVSync = false;
 	// Device features enabled by the example
 	// If not set, no additional features are enabled (may result in validation layer errors)
-	VkPhysicalDeviceFeatures enabledFeatures = {};
+	VkPhysicalDeviceFeatures enabledFeatures;
 	// fps timer (one second interval)
 	float fpsTimer = 0.0f;
 	// Create application wide Vulkan instance
